@@ -8,7 +8,7 @@ var request = require('supertest');
 var originalRegexp = xmlparser.regexp;
 
 describe('XmlParserMiddleware', function () {
-  
+
   var app;
   var itemList = {
     list: {
@@ -18,14 +18,25 @@ describe('XmlParserMiddleware', function () {
     }
   };
   var itemsXML = '<list><item>item1</item><item>item2</item><item>item3</item></list>';
+
+  var responseAlreadySent;
   var responder = function (req, res) {
+    responseAlreadySent = res.headersSent;
     res.json(req.body);
   };
+  var errHandler = function (err, req, res, next) {
+    responseAlreadySent = res.headersSent;
+    next(err);
+  };
+
+  beforeEach(function (){
+    responseAlreadySent = false;
+  });
 
   beforeEach(function () {
     app = express();
   });
-  
+
   describe('#testMime', function () {
 
     var regexp = xmlparser.regexp;
@@ -49,11 +60,12 @@ describe('XmlParserMiddleware', function () {
   });
 
   describe('#testMiddleware', function () {
-    
+
     beforeEach(function () {
       app.use(xmlparser());
       app.get('/', responder);
       app.post('/', responder);
+      app.use(errHandler);
     });
 
     it('should not run if there is no request-body', function (done) {
@@ -130,6 +142,14 @@ describe('XmlParserMiddleware', function () {
         .expect(400, done);
     });
 
+    it('should throw 400 on "Invalid tagname in closing tag" + "Text data outside of root node" happen', function (done) {
+      request(app)
+        .post('/')
+        .set('Content-Type', 'application/vendor-spec+xml')
+        .send('<xml>data</;xml>ab<f')
+        .expect(400, done);
+    });
+
     it('should throw 400 on non-XML', function (done) {
       request(app)
         .post('/')
@@ -168,6 +188,23 @@ describe('XmlParserMiddleware', function () {
         });
     });
 
+    it('should parse xml ignoring errors after root node', function (done) {
+      request(app)
+        .post('/')
+        .set('Content-Type', 'application/vendor-spec+xml')
+        .send('<xml>data</xml>ab<f')
+        .expect(200, function (err, res) {
+          if (err) {
+            return done(err);
+          }
+          assert.deepEqual(res.body, {
+            xml: 'data'
+          });
+          assert.equal(responseAlreadySent, false);
+          done();
+        });
+    });
+
     it('should throw 400 on invalid xml body', function (done) {
       request(app)
         .post('/')
@@ -176,7 +213,7 @@ describe('XmlParserMiddleware', function () {
         .expect(400, done);
     });
 
-    it('should throw 400 on invalid xml body', function (done) {
+    it('should throw 400 on invalid xml body (2)', function (done) {
       request(app)
         .post('/')
         .set('Content-Type', 'application/vendor-spec+xml')
@@ -225,7 +262,7 @@ describe('XmlParserMiddleware', function () {
       app.use(xmlparser());
       app.post('/', responder);
     });
-    
+
     it('should permit overloading mime-type regular expression', function () {
       assert.notEqual(originalRegexp, xmlparser.regexp);
       assert.equal(xmlparser.regexp.test('custom/mime'), true);
@@ -263,7 +300,7 @@ describe('XmlParserMiddleware', function () {
   });
 
   describe('#testRouteMiddleware', function () {
-    
+
     beforeEach(function () {
       app.post('/', function (req, res) {
         assert.equal(req.rawBody, undefined);
@@ -308,7 +345,7 @@ describe('XmlParserMiddleware', function () {
   describe('#when configured with no explicit array and non-normalized tagnames', function () {
     var inputXml;
     var expectedJson;
-    
+
     beforeEach(function () {
       app.use(xmlparser({
         explicitArray: false,
@@ -339,11 +376,11 @@ describe('XmlParserMiddleware', function () {
           done();
         });
     });
-        
+
   });
-  
+
   describe('#testParserOptions', function () {
-    
+
     var xml = '<UPPERCASE aTTr="mixed">  TRIMM   </UPPERCASE>';
     var list = '<ITEMs><item attr="one"/><item attr="two"/></ITEMs>';
 
